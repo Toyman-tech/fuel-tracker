@@ -25,6 +25,7 @@ import {
   removeLogFromDb,
   subscribeToStations,
   seedInitialStations,
+  saveStationToDb,
   subscribeToVehicles,
   saveVehicleToDb,
   removeVehicleFromDb
@@ -67,7 +68,16 @@ export default function Home() {
       // 2. Live Stations
       unsubscribeStations = subscribeToStations((firebaseStations) => {
         if (firebaseStations && firebaseStations.length > 0) {
-          setStations(firebaseStations);
+          setStations(prev => {
+            const map = new Map<string, FuelStation>();
+            // 1. Populate default mock stations
+            mockStations.forEach(s => map.set(s.id, s));
+            // 2. Preserve current local state
+            prev.forEach(s => map.set(s.id, s));
+            // 3. Override with live updates from Firebase
+            firebaseStations.forEach(s => map.set(s.id, s));
+            return Array.from(map.values());
+          });
         }
       });
 
@@ -119,6 +129,11 @@ export default function Home() {
     removeVehicleFromDb(id);
   };
 
+  const handleUpdateStation = (updatedStation: FuelStation) => {
+    setStations(prev => prev.map(s => s.id === updatedStation.id ? updatedStation : s));
+    saveStationToDb(updatedStation);
+  };
+
   const handleSelectStationForRoute = (station: FuelStation) => {
     setActiveTab('route');
   };
@@ -163,6 +178,7 @@ export default function Home() {
             stations={stations}
             preferences={preferences}
             onSelectStationForRoute={handleSelectStationForRoute}
+            onUpdateStation={handleUpdateStation}
           />
         )}
 

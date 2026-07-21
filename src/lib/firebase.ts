@@ -40,8 +40,8 @@ export const subscribeToStations = (callback: (stations: FuelStation[]) => void)
       const data = snapshot.val();
       if (data) {
         const stationList: FuelStation[] = Array.isArray(data) 
-          ? data 
-          : Object.keys(data).map(key => ({ id: key, ...data[key] }));
+          ? data.filter(Boolean).map((s, idx) => ({ ...s, id: s.id || `st-${idx + 1}` }))
+          : Object.keys(data).map(key => ({ id: data[key].id || key, ...data[key] }));
         callback(stationList);
       }
     }, (error) => {
@@ -57,9 +57,23 @@ export const subscribeToStations = (callback: (stations: FuelStation[]) => void)
 export const seedInitialStations = async (initialData: FuelStation[]) => {
   try {
     const stationsRef = ref(rtdb, "stations");
-    await set(stationsRef, initialData);
+    const stationObj: Record<string, FuelStation> = {};
+    initialData.forEach(s => {
+      stationObj[s.id] = s;
+    });
+    await set(stationsRef, stationObj);
   } catch (err) {
     console.warn("Firebase seed error:", err);
+  }
+};
+
+// Save or update a fuel station entry in Firebase
+export const saveStationToDb = async (station: FuelStation) => {
+  try {
+    const stationRef = ref(rtdb, `stations/${station.id}`);
+    await set(stationRef, station);
+  } catch (err) {
+    console.warn("Failed to save station to Firebase:", err);
   }
 };
 

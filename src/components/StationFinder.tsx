@@ -19,7 +19,9 @@ import {
   Layers,
   X,
   PlusCircle,
-  DollarSign
+  DollarSign,
+  Edit3,
+  Check
 } from 'lucide-react';
 import { FuelStation, FuelGradeKey, Amenity, UserPreferences } from '../types';
 
@@ -27,12 +29,14 @@ interface StationFinderProps {
   stations: FuelStation[];
   preferences: UserPreferences;
   onSelectStationForRoute?: (station: FuelStation) => void;
+  onUpdateStation?: (updatedStation: FuelStation) => void;
 }
 
 export const StationFinder: React.FC<StationFinderProps> = ({
   stations,
   preferences,
   onSelectStationForRoute,
+  onUpdateStation,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedGrade, setSelectedGrade] = useState<FuelGradeKey>(preferences.selectedFuelGrade || 'regular');
@@ -44,7 +48,15 @@ export const StationFinder: React.FC<StationFinderProps> = ({
 
   // Price Report modal state
   const [reportModalStation, setReportModalStation] = useState<FuelStation | null>(null);
+  const [selectedReportGrade, setSelectedReportGrade] = useState<FuelGradeKey>('regular');
   const [newPriceInput, setNewPriceInput] = useState<string>('');
+  
+  // Inline Price Edit state in Station Details modal
+  const [editingGradeKey, setEditingGradeKey] = useState<FuelGradeKey | null>(null);
+  const [inlinePriceInput, setInlinePriceInput] = useState<string>('');
+
+  // Toast Notification state
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const toggleAmenity = (amenity: Amenity) => {
     setSelectedAmenities(prev => 
@@ -52,9 +64,104 @@ export const StationFinder: React.FC<StationFinderProps> = ({
     );
   };
 
+  // Open Report Price Modal
+  const handleOpenReportModal = (station: FuelStation) => {
+    setReportModalStation(station);
+    const initialGrade = selectedGrade || station.prices[0]?.key || 'regular';
+    setSelectedReportGrade(initialGrade);
+    const pObj = station.prices.find(p => p.key === initialGrade) || station.prices[0];
+    setNewPriceInput(pObj ? pObj.price.toString() : '850');
+  };
+
+  // Handle grade change inside Report Modal
+  const handleReportGradeChange = (gradeKey: FuelGradeKey) => {
+    setSelectedReportGrade(gradeKey);
+    if (reportModalStation) {
+      const pObj = reportModalStation.prices.find(p => p.key === gradeKey);
+      if (pObj) {
+        setNewPriceInput(pObj.price.toString());
+      }
+    }
+  };
+
+  // Submit Price Update
+  const handleSavePriceUpdate = (targetStation: FuelStation, gradeKey: FuelGradeKey, priceVal: number) => {
+    if (isNaN(priceVal) || priceVal <= 0) return;
+
+    const updatedPrices = targetStation.prices.map(p => {
+      if (p.key === gradeKey) {
+        return { ...p, price: priceVal, available: true };
+      }
+      return p;
+    });
+
+    if (!updatedPrices.some(p => p.key === gradeKey)) {
+      const gradeNames: Record<FuelGradeKey, string> = {
+        regular: 'PMS (Petrol)',
+        midgrade: 'Midgrade PMS',
+        premium: 'V-Power PMS',
+        diesel: 'AGO (Diesel)',
+        e85: 'E85 Ethanol',
+        cng: 'CNG (Compressed Gas)',
+        ev_fast: 'EV Fast Charger ⚡',
+        ev_level2: 'EV Level 2 Charger ⚡'
+      };
+      const gradeUnits: Record<FuelGradeKey, string> = {
+        regular: 'L',
+        midgrade: 'L',
+        premium: 'L',
+        diesel: 'L',
+        e85: 'L',
+        cng: 'SMC',
+        ev_fast: 'kWh',
+        ev_level2: 'kWh'
+      };
+      updatedPrices.push({
+        key: gradeKey,
+        name: gradeNames[gradeKey] || gradeKey,
+        price: priceVal,
+        category: gradeKey === 'diesel' ? 'diesel' : gradeKey === 'cng' || gradeKey === 'ev_fast' || gradeKey === 'ev_level2' || gradeKey === 'e85' ? 'alternative' : 'gasoline',
+        available: true,
+        unit: gradeUnits[gradeKey] || 'L'
+      });
+    }
+
+    const updatedStation: FuelStation = {
+      ...targetStation,
+      prices: updatedPrices,
+      verifiedAt: 'Just now'
+    };
+
+    if (onUpdateStation) {
+      onUpdateStation(updatedStation);
+    }
+
+    if (activeStationModal && activeStationModal.id === targetStation.id) {
+      setActiveStationModal(updatedStation);
+    }
+
+    setToastMessage(`Price updated to ${preferences.currencySymbol}${priceVal.toFixed(2)} for ${targetStation.name}`);
+    setTimeout(() => setToastMessage(null), 4000);
+    setReportModalStation(null);
+    setEditingGradeKey(null);
+  };
+
   // Filter & Sort stations
   const filteredStations = useMemo(() => {
-    return stations.filter(station => {
+    // Determine lowest price for selected grade across all stations for top deal badge
+    let minPriceForGrade = Infinity;
+    stations.forEach(s => {
+      const p = s.prices.find(pr => pr.key === selectedGrade);
+      if (p && p.price < minPriceForGrade) {
+        minPriceForGrade = p.price;
+      }
+    });
+
+    return stations.map(station => ({
+      ...station,
+      // Recalculate top deal based on selected fuel grade price
+      isTopDeal: (station.prices.find(p => p.key === selectedGrade)?.price ?? Infinity) === minPriceForGrade
+    })).filter(station => {
       // Search query
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
@@ -109,7 +216,15 @@ export const StationFinder: React.FC<StationFinderProps> = ({
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 relative">
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-50 bg-emerald-500 text-slate-950 px-4 py-3 rounded-xl shadow-2xl font-bold text-xs flex items-center gap-2 animate-in fade-in slide-in-from-bottom-5 border border-emerald-300">
+          <CheckCircle2 className="w-4 h-4 text-slate-950" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
+
       {/* Top Filter Header & Controls */}
       <div className="glass-panel p-5 rounded-2xl border border-slate-800 space-y-4">
         
@@ -473,7 +588,7 @@ export const StationFinder: React.FC<StationFinderProps> = ({
                       {/* Action Buttons */}
                       <div className="flex items-center gap-2">
                         <button
-                          onClick={() => setReportModalStation(station)}
+                          onClick={() => handleOpenReportModal(station)}
                           className="px-2.5 py-1 bg-slate-800/80 hover:bg-slate-700 border border-slate-700/60 rounded-lg text-slate-300 text-xs font-medium transition-all flex items-center gap-1"
                           title="Report price update"
                         >
@@ -534,22 +649,74 @@ export const StationFinder: React.FC<StationFinderProps> = ({
               </div>
             </div>
 
-            {/* Complete Pricing List */}
+            {/* Complete Pricing List with Inline Edit Option */}
             <div className="space-y-2">
-              <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400">Current Fuel Prices</h4>
-              <div className="grid grid-cols-2 gap-2">
-                {activeStationModal.prices.map(p => (
-                  <div key={p.key} className="bg-slate-900/90 border border-slate-800 p-3 rounded-xl flex items-center justify-between">
-                    <div>
-                      <div className="text-xs font-semibold text-white">{p.name}</div>
-                      <div className="text-[10px] text-slate-400 uppercase">{p.category}</div>
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400">Current Fuel Prices</h4>
+                <span className="text-[11px] text-emerald-400 font-medium">Click Edit to update any grade</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {activeStationModal.prices.map(p => {
+                  const isEditing = editingGradeKey === p.key;
+
+                  return (
+                    <div key={p.key} className="bg-slate-900/90 border border-slate-800 p-3 rounded-xl flex items-center justify-between gap-2">
+                      <div>
+                        <div className="text-xs font-semibold text-white">{p.name}</div>
+                        <div className="text-[10px] text-slate-400 uppercase">{p.category}</div>
+                      </div>
+
+                      {isEditing ? (
+                        <div className="flex items-center gap-1">
+                          <span className="text-xs font-bold text-emerald-400">{preferences.currencySymbol}</span>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={inlinePriceInput}
+                            onChange={(e) => setInlinePriceInput(e.target.value)}
+                            className="w-20 bg-slate-950 border border-emerald-500/80 rounded-lg px-2 py-1 text-xs font-bold text-white focus:outline-none"
+                            autoFocus
+                          />
+                          <button
+                            onClick={() => {
+                              const parsed = parseFloat(inlinePriceInput);
+                              if (!isNaN(parsed) && parsed > 0) {
+                                handleSavePriceUpdate(activeStationModal, p.key, parsed);
+                              }
+                            }}
+                            className="p-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-lg"
+                            title="Save price"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => setEditingGradeKey(null)}
+                            className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-400 rounded-lg"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-3">
+                          <div className="text-right">
+                            <div className="text-base font-black text-emerald-400">{preferences.currencySymbol}{p.price.toFixed(2)}</div>
+                            <div className="text-[9px] text-slate-400">per {p.unit}</div>
+                          </div>
+                          <button
+                            onClick={() => {
+                              setEditingGradeKey(p.key);
+                              setInlinePriceInput(p.price.toString());
+                            }}
+                            className="p-1.5 bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-lg text-xs transition-all"
+                            title="Edit this fuel price"
+                          >
+                            <Edit3 className="w-3.5 h-3.5 text-emerald-400" />
+                          </button>
+                        </div>
+                      )}
                     </div>
-                    <div className="text-right">
-                      <div className="text-lg font-black text-emerald-400">{preferences.currencySymbol}{p.price.toFixed(2)}</div>
-                      <div className="text-[9px] text-slate-400">per {p.unit}</div>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
 
@@ -621,7 +788,7 @@ export const StationFinder: React.FC<StationFinderProps> = ({
       {/* Report Price Modal */}
       {reportModalStation && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="glass-panel max-w-md w-full rounded-2xl border border-slate-700 p-6 space-y-4 relative">
+          <div className="glass-panel max-w-md w-full rounded-2xl border border-slate-700 p-6 space-y-4 relative animate-in fade-in zoom-in-95 duration-200">
             <button
               onClick={() => setReportModalStation(null)}
               className="absolute top-4 right-4 text-slate-400 hover:text-white"
@@ -634,29 +801,42 @@ export const StationFinder: React.FC<StationFinderProps> = ({
               <h3 className="font-bold text-lg text-white">Report Updated Price</h3>
             </div>
             <p className="text-xs text-slate-400">
-              Help community drivers by updating the price for <strong className="text-white">{reportModalStation.name}</strong>.
+              Help community drivers by updating the fuel price for <strong className="text-white">{reportModalStation.name}</strong>.
             </p>
 
             <div className="space-y-3">
               <div>
                 <label className="text-xs text-slate-300 font-medium block mb-1">Fuel Grade</label>
-                <select className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-sm text-white focus:outline-none">
+                <select 
+                  value={selectedReportGrade}
+                  onChange={(e) => handleReportGradeChange(e.target.value as FuelGradeKey)}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-sm text-white focus:outline-none focus:border-emerald-500 cursor-pointer"
+                >
                   {reportModalStation.prices.map(p => (
-                    <option key={p.key} value={p.key}>{p.name} (Current: ${p.price.toFixed(2)})</option>
+                    <option key={p.key} value={p.key}>
+                      {p.name} (Current: {preferences.currencySymbol}{p.price.toFixed(2)}/{p.unit})
+                    </option>
                   ))}
                 </select>
               </div>
 
               <div>
-                <label className="text-xs text-slate-300 font-medium block mb-1">New Price ({preferences.currencySymbol} / {preferences.volumeUnit})</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  placeholder="e.g. 3.15"
-                  value={newPriceInput}
-                  onChange={(e) => setNewPriceInput(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-sm text-white focus:outline-none focus:border-emerald-500"
-                />
+                <label className="text-xs text-slate-300 font-medium block mb-1">
+                  New Price ({preferences.currencySymbol} / {preferences.volumeUnit === 'gallons' ? 'gal' : 'liter'})
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 font-bold text-emerald-400 text-sm">
+                    {preferences.currencySymbol}
+                  </span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    placeholder="e.g. 850"
+                    value={newPriceInput}
+                    onChange={(e) => setNewPriceInput(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-8 pr-4 py-2.5 text-sm text-white font-bold focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
               </div>
             </div>
 
@@ -669,11 +849,12 @@ export const StationFinder: React.FC<StationFinderProps> = ({
               </button>
               <button
                 onClick={() => {
-                  alert(`Thank you! Updated price of ${preferences.currencySymbol}${newPriceInput} submitted to verification network.`);
-                  setReportModalStation(null);
-                  setNewPriceInput('');
+                  const numVal = parseFloat(newPriceInput);
+                  if (!isNaN(numVal) && numVal > 0) {
+                    handleSavePriceUpdate(reportModalStation, selectedReportGrade, numVal);
+                  }
                 }}
-                className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-xl text-xs font-bold transition-all"
+                className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-xl text-xs font-bold transition-all shadow-md shadow-emerald-500/20"
               >
                 Submit Price Update
               </button>
