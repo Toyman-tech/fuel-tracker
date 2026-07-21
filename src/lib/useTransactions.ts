@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { collection, query, orderBy, limit, onSnapshot } from "firebase/firestore";
 import { db } from "../firebaseConfig";
-import { Transaction } from "./types";
+import { Transaction, parseTimestampToDate } from "./types";
 import { INITIAL_MOCK_TRANSACTIONS } from "./mockService";
 
 export function useTransactions() {
@@ -35,7 +35,7 @@ export function useTransactions() {
                   device_id: data.device_id || "verifier_node_01",
                   total_volume_liters: Number(data.total_volume_liters || 0),
                   max_flow_rate: Number(data.max_flow_rate || 0),
-                  timestamp: data.timestamp || new Date().toISOString(),
+                  timestamp: parseTimestampToDate(data.timestamp).toISOString(),
                 };
               });
               setTransactions(docs);

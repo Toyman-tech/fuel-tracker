@@ -1,6 +1,6 @@
 "use client";
 
-import { Transaction } from "../lib/types";
+import { Transaction, parseTimestampToDate } from "../lib/types";
 import { Clock, Cpu, Droplets, Gauge, History } from "lucide-react";
 
 interface TransactionsTableProps {
@@ -23,24 +23,20 @@ export default function TransactionsTable({
     );
   }
 
-  const formatDate = (isoString: string) => {
-    try {
-      const date = new Date(isoString);
-      return {
-        date: date.toLocaleDateString(undefined, {
-          month: "short",
-          day: "numeric",
-          year: "numeric",
-        }),
-        time: date.toLocaleTimeString(undefined, {
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-        }),
-      };
-    } catch {
-      return { date: isoString, time: "" };
-    }
+  const formatDate = (rawTimestamp: unknown) => {
+    const date = parseTimestampToDate(rawTimestamp);
+    return {
+      date: date.toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      }),
+      time: date.toLocaleTimeString(undefined, {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      }),
+    };
   };
 
   return (

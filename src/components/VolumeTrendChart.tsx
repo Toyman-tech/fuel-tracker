@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Transaction } from "../lib/types";
+import { Transaction, parseTimestampToDate } from "../lib/types";
 import {
   BarChart,
   Bar,
@@ -43,7 +43,7 @@ export default function VolumeTrendChart({
   const chartData = [...transactions]
     .reverse()
     .map((tx) => {
-      const date = new Date(tx.timestamp);
+      const date = parseTimestampToDate(tx.timestamp);
       const formattedTime = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
       const formattedDate = date.toLocaleDateString([], { month: "short", day: "numeric" });
 
